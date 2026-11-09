@@ -4,7 +4,7 @@
     <deleteConstraint>SetNull</deleteConstraint>
     <label>Submitted By</label>
     <referenceTo>User</referenceTo>
-    <relationshipName>Leave_Requests1</relationshipName>
+    <relationshipName>Submitted_Leave_Requests</relationshipName>
     <required>false</required>
     <trackTrending>false</trackTrending>
     <type>Lookup</type>
