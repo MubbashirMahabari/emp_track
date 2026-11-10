@@ -115,8 +115,10 @@ public static void shareLeaveBalanceWithManager(
     );
 }
 
+
 /**
  * Synchronizes manager access when an employee's manager changes.
+ * Also reassigns pending leave requests to the new manager.
  */
 public static void syncEmployeeManagerAccess(
     Id employeeId,
@@ -129,12 +131,41 @@ public static void syncEmployeeManagerAccess(
         );
     }
 
-    // Remove the previous manager's custom share.
+    // Retrieve all related leave requests.
+    List<Leave_Request__c> requests = [
+        SELECT Id, Manager__c, Status__c
+        FROM Leave_Request__c
+        WHERE Employee__c = :employeeId
+    ];
+
+    // Retrieve all related leave balances.
+    List<Leave_Balance__c> balances = [
+        SELECT Id
+        FROM Leave_Balance__c
+        WHERE Employee__c = :employeeId
+    ];
+
+    // Do not remove the old manager while pending requests
+    // exist without assigning a replacement manager.
+    if (newManagerId == null) {
+        for (Leave_Request__c request : requests) {
+            if (
+                request.Status__c ==
+                'Pending Manager Approval'
+            ) {
+                throw new LeaveTrackerException(
+                    'Please assign a new manager before removing the current manager. Pending leave requests exist.'
+                );
+            }
+        }
+    }
+
+    // Remove old manager's custom sharing access.
     if (
         oldManagerId != null &&
         oldManagerId != newManagerId
     ) {
-        List<Employee__Share> oldShares = [
+        List<Employee__Share> employeeShares = [
             SELECT Id
             FROM Employee__Share
             WHERE ParentId = :employeeId
@@ -143,15 +174,102 @@ public static void syncEmployeeManagerAccess(
                 :Schema.Employee__Share.RowCause.Manager_Access__c
         ];
 
-        if (!oldShares.isEmpty()) {
-            delete oldShares;
+        if (!employeeShares.isEmpty()) {
+            delete employeeShares;
+        }
+
+        Set<Id> requestIds = new Map<Id, Leave_Request__c>(
+            requests
+        ).keySet();
+
+        if (!requestIds.isEmpty()) {
+            List<Leave_Request__Share> requestShares = [
+                SELECT Id
+                FROM Leave_Request__Share
+                WHERE ParentId IN :requestIds
+                AND UserOrGroupId = :oldManagerId
+                AND RowCause =
+                    :Schema.Leave_Request__Share.RowCause.Manager_Access__c
+            ];
+
+            if (!requestShares.isEmpty()) {
+                delete requestShares;
+            }
+        }
+
+        Set<Id> balanceIds = new Map<Id, Leave_Balance__c>(
+            balances
+        ).keySet();
+
+        if (!balanceIds.isEmpty()) {
+            List<Leave_Balance__Share> balanceShares = [
+                SELECT Id
+                FROM Leave_Balance__Share
+                WHERE ParentId IN :balanceIds
+                AND UserOrGroupId = :oldManagerId
+                AND RowCause =
+                    :Schema.Leave_Balance__Share.RowCause.Manager_Access__c
+            ];
+
+            if (!balanceShares.isEmpty()) {
+                delete balanceShares;
+            }
         }
     }
 
-    // Grant access to the newly assigned manager.
-    if (newManagerId != null) {
-        shareEmployeeWithManager(
-            employeeId,
+    // No new manager means there is nothing more to share.
+    if (newManagerId == null) {
+        return;
+    }
+
+    // Grant the new manager Employee Read access.
+    shareEmployeeWithManager(
+        employeeId,
+        newManagerId
+    );
+
+    // Reassign pending requests to the new manager.
+    List<Leave_Request__c> requestsToUpdate =
+        new List<Leave_Request__c>();
+
+    for (Leave_Request__c request : requests) {
+        if (
+            request.Status__c ==
+            'Pending Manager Approval'
+        ) {
+            if (request.Manager__c != newManagerId) {
+                request.Manager__c = newManagerId;
+                requestsToUpdate.add(request);
+            }
+
+            // Pending requests require Edit access.
+            shareLeaveRequestWithManager(
+                request.Id,
+                newManagerId
+            );
+        } else {
+            // Historical requests receive Read access.
+            Leave_Request__Share historicalShare =
+                new Leave_Request__Share(
+                    ParentId = request.Id,
+                    UserOrGroupId = newManagerId,
+                    AccessLevel = 'Read',
+                    RowCause =
+                        Schema.Leave_Request__Share.RowCause.Manager_Access__c
+                );
+
+            insert historicalShare;
+        }
+    }
+
+    if (!requestsToUpdate.isEmpty()) {
+        update requestsToUpdate;
+    }
+
+    // Grant the new manager Read access to leave balances.
+    for (Leave_Balance__c balance : balances) {
+        shareLeaveBalanceWithManager(
+            balance.Id,
             newManagerId
         );
     }

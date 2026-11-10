@@ -1,30 +1,40 @@
 @IsTest
 private class LeaveTrackerSharingServiceTest {
 
-    private static User createManager(String suffix) {
+ 
+private static User createManager(String suffix) {
 
-        Profile profile = [
-            SELECT Id
-            FROM Profile
-            WHERE Name = 'Standard User'
-            LIMIT 1
-        ];
+    Profile profile = [
+        SELECT Id
+        FROM Profile
+        WHERE Name = 'Standard User'
+        LIMIT 1
+    ];
 
-        User manager = new User(
-            Alias = 'mgr' + suffix,
-            Email = 'manager' + suffix + '@test.com',
-            EmailEncodingKey = 'UTF-8',
-            LastName = 'Manager ' + suffix,
-            LanguageLocaleKey = 'en_US',
-            LocaleSidKey = 'en_US',
-            ProfileId = profile.Id,
-            TimeZoneSidKey = 'Asia/Kolkata',
-            Username = 'manager' + suffix + '@test.com'
-        );
+    // Generate a unique username for every test execution.
+    String uniqueUsername =
+    'manager.' + suffix + '.' +
+    UserInfo.getOrganizationId() + '.' +
+    String.valueOf(Datetime.now().getTime()) +
+    '.' + String.valueOf(Crypto.getRandomInteger()) +
+    '@example.test';
 
-        insert manager;
-        return manager;
-    }
+    User manager = new User(
+        Alias = 'mgr' + suffix,
+        Email = uniqueUsername,
+        EmailEncodingKey = 'UTF-8',
+        LastName = 'Manager ' + suffix,
+        LanguageLocaleKey = 'en_US',
+        LocaleSidKey = 'en_US',
+        ProfileId = profile.Id,
+        TimeZoneSidKey = 'Asia/Kolkata',
+        Username = uniqueUsername
+    );
+
+    insert manager;
+    return manager;
+}
+
 
     @IsTest
     static void syncEmployeeManagerAccess_reassignsAllRecords() {

@@ -587,4 +587,80 @@ static void approveLeaveRequest_deductsPreviouslyApprovedLeave() {
         Test.stopTest();
     }
 }
+
+@IsTest
+static void approveLeaveRequest_afterManagerReassignment() {
+
+    User managerA = createManagerUser();
+    User managerB = createManagerUser();
+
+    Employee__c employee;
+    Leave_Request__c request;
+
+    System.runAs(managerA) {
+
+        // Create employee assigned to Manager A.
+        employee = createEmployee(managerA);
+
+        // Create pending leave request assigned to Manager A.
+        request = createPendingRequest(
+            employee,
+            managerA
+        );
+
+        // Create sufficient leave balance.
+        createLeaveBalance(
+            employee,
+            request.From_Date__c.year()
+        );
+
+        // Create initial sharing for Manager A.
+        LeaveTrackerSharingService.shareEmployeeWithManager(
+            employee.Id,
+            managerA.Id
+        );
+
+        LeaveTrackerSharingService.shareLeaveRequestWithManager(
+            request.Id,
+            managerA.Id
+        );
+
+        // Update employee's assigned manager.
+        employee.Manager__c = managerB.Id;
+        update employee;
+
+        // Synchronize access and reassign pending request.
+LeaveTrackerSharingService.syncEmployeeManagerAccess(
+    employee.Id,
+    managerA.Id,
+    managerB.Id
+);
+    }
+
+    // Manager B should now be able to approve the request.
+    System.runAs(managerB) {
+
+        Test.startTest();
+
+        Leave_Request__c result =
+            LeaveApprovalService.approveLeaveRequest(
+                request.Id
+            );
+
+        Test.stopTest();
+
+        System.assertEquals(
+            managerB.Id,
+            result.Manager__c,
+            'Pending request should be assigned to Manager B.'
+        );
+
+        System.assertEquals(
+            'Approved',
+            result.Status__c,
+            'Newly assigned manager should be able to approve the request.'
+        );
+    }
+}
+
 }
